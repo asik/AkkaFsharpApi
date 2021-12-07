@@ -7,7 +7,6 @@ open System.Threading.Tasks
 open type System.Console
 
 let system = Akka.FSharp.System.create "my-system" (Configuration.load ())
-let actorFactory = ActorFactory system
 
 type DoorState =
 | Opened
@@ -16,22 +15,24 @@ type DoorState =
 type DoorActorMessage =
 | TimerElapsed
 
-let doorActorRef = actorFactory.Create<DoorActorMessage, DoorState>(
-    Closed,
-    fun message state { Sender = sender } -> task { 
-        match message with
-        | TimerElapsed -> 
-            WriteLine $"Message: {sender.Path} ({state})"
-        return match state with Opened -> Closed | _ -> Opened
-    },
-    onTerminated = fun terminated state _context -> task { 
-        do WriteLine $"Terminated: {terminated}"
-        return state
-    },
-    onLifecycle = fun message state context -> 
-        WriteLine $"Lifecycle: {message} {context}" 
-        state
-)
+let doorActorRef = 
+    let props = PropsBuilder.Create<_, _>(
+        Closed,
+        fun message state { Sender = sender; ActorContext = context } -> task { 
+            match message with
+            | TimerElapsed -> 
+                WriteLine $"Message: {sender.Path} ({state})"
+            return match state with Opened -> Closed | _ -> Opened
+        },
+        onTerminated = fun terminated state _context -> task { 
+            do WriteLine $"Terminated: {terminated}"
+            return state
+        },
+        onLifecycle = fun message state context -> 
+            WriteLine $"Lifecycle: {message} {context}" 
+            state
+    )
+    system.ActorOf props
 
 let program _ = task {
     for _ in 0 .. 2 do

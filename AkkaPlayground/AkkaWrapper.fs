@@ -1,6 +1,7 @@
 ﻿module AkkaWrapper
 
 open Akka.Actor
+open System.Threading.Tasks
 
 type LifecycleMessage =
     | PreStart
@@ -82,29 +83,59 @@ let createProps<'Message, 'State> initialState onReceive onTerminated onLifecycl
             fun () -> ActorWrapper(initialState, onReceive, onTerminated, onLifecycle)
         )
 
-type ActorFactory(system: ActorSystem) =
+type ReceiveHandler<'Message, 'State> = 'Message -> 'State -> MessageContext -> Task<'State>
+type TerminatedHandler<'State> = Terminated -> 'State -> MessageContext -> Task<'State>
+type LifecycleHandler<'State> = LifecycleMessage -> 'State -> MessageContext -> 'State
 
-    member _.Create<'Message, 'State>(initialState, onReceive, ?onTerminated, ?onLifecycle, ?supervisorStrategy) = 
-        createProps<'Message, 'State> initialState onReceive onTerminated onLifecycle supervisorStrategy
-        |> system.ActorOf
+type PropsBuilder<'Message, 'State> =
+    { InitialState: 'State;
+      OnReceive: ReceiveHandler<'Message, 'State>
+      OnTerminated: TerminatedHandler<'State> option
+      OnLifecycle: LifecycleHandler<'State> option
+      SupervisorStrategy: SupervisorStrategy option }
+with
+    member x.ToProps () =
+        createProps (x.InitialState) (x.OnReceive) x.OnTerminated x.OnLifecycle x.SupervisorStrategy
+    
+    static member Create (initialState, onReceive, ?onTerminated, ?onLifecycle, ?supervisorStrategy) =
+        { InitialState = initialState 
+          OnReceive = onReceive 
+          OnTerminated = onTerminated
+          OnLifecycle = onLifecycle
+          SupervisorStrategy = supervisorStrategy }.ToProps()
 
-    member _.CreateStateless<'Message>(onReceive, ?onTerminated, ?onLifecycle, ?supervisorStrategy) =
-        let onReceive = fun (message: 'Message) (_state: unit) context -> task {
-            do! onReceive message context
+type StatelessReceiveHandler<'Message> = 'Message -> MessageContext -> Task<unit>
+type StatelessTerminatedHandler = Terminated -> MessageContext -> Task<unit>
+type StatelessLifecycleHandler = LifecycleMessage -> MessageContext -> unit
+
+type StatelessPropsBuilder<'Message> =
+    { OnReceive: StatelessReceiveHandler<'Message>
+      OnTerminated: StatelessTerminatedHandler option
+      OnLifecycle: StatelessLifecycleHandler option
+      SupervisorStrategy: SupervisorStrategy option }
+with
+    member x.ToProps () =
+        let onReceive = fun (message: 'Message) (_state: unit) messageContext -> task {
+            do! x.OnReceive message messageContext
         }
-            
+        
         let onTerminated = 
-            onTerminated 
-            |> Option.map(fun onTerminated -> fun (terminated: Terminated) (_state:unit) (b: MessageContext) -> task { 
-                do! onTerminated terminated b
+            x.OnTerminated 
+            |> Option.map(fun onTerminated -> fun terminated _state messageContext -> task { 
+                do! onTerminated terminated messageContext
                 return ()
             })
 
         let onLifecycle =
-            onLifecycle
-            |> Option.map(fun onLifecycle -> fun (message: LifecycleMessage) (_state: unit) (context: MessageContext) ->
-                onLifecycle message context
+            x.OnLifecycle
+            |> Option.map(fun onLifecycle -> fun lifecycleMessage _state messageContext ->
+                onLifecycle lifecycleMessage messageContext
             )
-        createProps () onReceive onTerminated onLifecycle supervisorStrategy
-        |> system.ActorOf
+        createProps () onReceive onTerminated onLifecycle x.SupervisorStrategy
+    
+    static member Create (onReceive, ?onTerminated, ?onLifecycle, ?supervisorStrategy) =
+        { OnReceive = onReceive 
+          OnTerminated = onTerminated
+          OnLifecycle = onLifecycle
+          SupervisorStrategy = supervisorStrategy }.ToProps()
 
