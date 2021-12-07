@@ -6,9 +6,9 @@ open System.Threading.Tasks
 type LifecycleMessage =
     | PreStart
     | PostStop
-    | PreRestart of exn * obj
-    | PostRestart of exn
-    | Unhandled of obj
+    | PreRestart of reason: exn * message: obj
+    | PostRestart of reason: exn
+    | Unhandled of message: obj
 
 type MessageContext =
     { Self: IActorRef
@@ -58,17 +58,17 @@ type ActorWrapper<'Message, 'State> private (onLifecycleMessage, initialState: '
         if not (this.CallLifecycleHandler PostStop)
         then base.PostStop()
 
-    override this.PreRestart(exn, msg) =
-        if not (this.CallLifecycleHandler(PreRestart(exn, msg)))
-        then base.PreRestart(exn, msg)
+    override this.PreRestart(reason, message) =
+        if not (this.CallLifecycleHandler(PreRestart(reason, message)))
+        then base.PreRestart(reason, message)
 
-    override this.PostRestart exn =
-        if not (this.CallLifecycleHandler(PostRestart exn))
-        then base.PostRestart exn
+    override this.PostRestart reason =
+        if not (this.CallLifecycleHandler(PostRestart reason))
+        then base.PostRestart reason
 
-    override this.Unhandled msg =
-        if not (this.CallLifecycleHandler(Unhandled msg))
-        then base.Unhandled msg
+    override this.Unhandled message =
+        if not (this.CallLifecycleHandler(Unhandled message))
+        then base.Unhandled message
 
 
 let createProps<'Message, 'State> initialState onReceive onTerminated onLifecycle supervisorStrategy =
